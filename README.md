@@ -45,6 +45,8 @@ Bấm bìa có hiệu ứng zoom và blur trong 280ms, sau đó mở thư mục 
 
 ## Bìa thật và tải theo trang
 
-Bìa PDF dùng thumbnail trang đầu của Google Drive. Bìa thư mục lấy ảnh/PDF đầu tiên theo tên, hoặc tìm trong thư mục con đầu tiên (tối đa 5 tầng). Ảnh bìa chỉ bắt đầu tải khi bấm Mở kệ sách; tải tuần tự cho các album của trang hiện tại. Chuyển trang hủy ảnh đang tải của trang cũ; không tải trước bìa trang kế tiếp. Bìa lỗi giữ tiêu đề dự phòng. Khi reload vẫn khôi phục trang kệ nhưng chưa tải ảnh hay tự mở PDF cho đến thao tác của người dùng.
+Bìa PDF dùng thumbnail trang đầu của Google Drive. Bìa thư mục lấy ảnh/PDF đầu tiên theo tên, hoặc duyệt sâu các thư mục con theo thứ tự tên, bỏ qua nhánh trống hoặc không truy cập được. Ảnh bìa chỉ bắt đầu tải khi bấm Mở kệ sách; tải tuần tự cho các album của trang hiện tại. Chuyển trang hủy ảnh đang tải của trang cũ; không tải trước bìa trang kế tiếp. Bìa lỗi giữ tiêu đề dự phòng. Khi reload vẫn khôi phục trang kệ nhưng chưa tải ảnh hay tự mở PDF cho đến thao tác của người dùng.
 
 Đã kiểm tra browser: mặc định 8, không có yêu cầu ảnh bìa trước nút mở kệ, tải lần lượt và hiện ảnh thật, đổi trang bắt đầu với 1 ảnh, reload khôi phục trang 2 với 0 ảnh yêu cầu.
+
+Bìa dùng thumbnail nhỏ 240px thay vì 600px để ưu tiên tốc độ. Danh sách thư mục được cache trong phiên để tránh gọi lại khi quay về trang đã xem. Cache được xóa khi đổi cấu hình API key. Kiểm tra thuật toán: `node tests/cover-source.test.js` (thư mục trống, thứ tự số tự nhiên, nhánh lỗi, hủy khi đổi trang, vòng lặp, PDF).

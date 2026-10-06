@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {findCover} from '../src/cover-source.js';
+const folder=(id,name=id)=>({id,name,mimeType:'application/vnd.google-apps.folder'});
+const image=(id)=>({id,name:id,mimeType:'image/jpeg'});
+const calls=[];
+const data={root:[folder('10'),folder('2'),folder('1')],1:[folder('empty')],empty:[],2:[folder('broken'),folder('deep')],deep:[image('page1')],10:[image('later')]};
+const options={list:async id=>{calls.push(id);if(id==='broken')throw Error('unavailable');return {files:data[id]};},sort:a=>a.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})),active:()=>true};
+assert.equal((await findCover(folder('root'),options)).id,'page1');
+assert.deepEqual(calls,['root','1','empty','2','broken','deep']);
+let active=true;
+assert.equal(await findCover(folder('root'),{...options,active:()=>active,list:async()=>{active=false;return {files:[image('page1')]};}}),null);
+assert.equal(await findCover(folder('cycle'),{...options,list:async()=>({files:[folder('cycle')]})}),null);
+assert.equal((await findCover({id:'pdf',mimeType:'application/pdf'},options)).id,'pdf');
+console.log('PASS: empty branches, natural order, unavailable folder, cancellation, cycle, PDF');
