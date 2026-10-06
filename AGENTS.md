@@ -2,7 +2,7 @@
 
 - Chỉ can thiệp file trong dự án. Không xóa/sửa file ngoài dự án; nếu cần phải hỏi người dùng.
 - Làm đúng yêu cầu, không tự mở rộng phạm vi. Nếu yêu cầu mơ hồ và ảnh hưởng kết quả, hỏi lại.
-- Context mới chỉ đọc AGENTS.md + CONTEXT.md; sau đó chỉ mở file code trực tiếp liên quan. Không quét lại toàn bộ repo/lịch sử.
+- MỖI TASK: trước khi làm, dùng AGENTS.md + CONTEXT.md làm nguồn bàn giao/trạng thái dự án; không đọc/quét lại toàn bộ lịch sử, context cũ hoặc toàn bộ codebase. Sau đó chỉ mở đúng file code trực tiếp liên quan đến yêu cầu hiện tại. Không yêu cầu người dùng phải nhắc lại quy tắc này ở từng task.
 - Task nhỏ xử lý trực tiếp; không gọi subagent/agent phụ nếu agent chính tự làm được.
 - TOKEN/CONTEXT GUARD: nếu cùng một yêu cầu đã cần khoảng 8 vòng tool/model mà chưa hoàn tất, dừng mở rộng, cập nhật CONTEXT.md ngắn gọn và báo người dùng nên mở context mới. Không tiếp tục chỉ vì còn context window.
 - Batch các lệnh độc lập khi hợp lý. Không poll/retry/re-read/re-build/re-test nếu chưa có lỗi hoặc thay đổi mới.

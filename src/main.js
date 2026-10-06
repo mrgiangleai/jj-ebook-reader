@@ -21,9 +21,9 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const sort=a=>a.sort((a,b)=>a.name.localeCompare(b.name,'vi',{numeric:true}));
 const img=f=>`https://drive.google.com/thumbnail?id=${encodeURIComponent(f.id)}&sz=w800`;
 app.innerHTML=`<header><a class="brand" href="#">JJ<span> / EBOOK READER</span></a><button id="settings">Cấu hình Drive</button></header><main><section class="intro"><div class="eyebrow">MỘT GÓC NHỎ ĐỂ ĐỌC</div><h1>Kệ sách của bạn<span>.</span></h1><p>Mở một album. Lật từng trang. Chậm lại một chút.</p><form id="source"><input id="link" aria-label="Link thư mục Google Drive" placeholder="Dán đường link thư mục Google Drive…" value="https://drive.google.com/drive/folders/${ROOT}"><button>Mở kệ sách ↗</button></form></section><div class="librarybar"><nav id="crumbs"></nav><div class="librarycontrols"><input id="filter" placeholder="Tìm theo tiêu đề…" aria-label="Tìm sách"><label>Sách / trang <select id="page-size"><option>4</option><option>8</option><option>12</option></select></label></div></div><p id="status" role="status"></p><section id="shelf" aria-label="Kệ sách"></section><div class="pagination"><button id="shelf-prev">← Trang trước</button><span id="shelf-position" role="status"></span><button id="shelf-next">Trang sau →</button></div><footer>JJ EBOOK READER <span>Ảnh từ Google Drive · Vị trí đọc lưu trên thiết bị</span></footer></main><dialog id="reader"><div class="readerbar"><button id="close">← Kệ sách</button><strong id="title"></strong><button id="fullscreen">⛶ Toàn màn hình</button></div><div class="stage"><button id="prev" class="turn" aria-label="Trang trước">‹</button><div id="spread"></div><button id="next" class="turn" aria-label="Trang sau">›</button></div><div class="readerfoot"><span id="position"></span><input id="jump" type="range" min="0" aria-label="Chọn cặp trang"><span>← → để lật trang</span></div></dialog><dialog id="pdf-reader"><div class="readerbar"><button id="pdf-close">← Kệ sách</button><strong id="pdf-title"></strong><a id="pdf-external" target="_blank" rel="noopener">Mở trên Drive ↗</a></div><iframe id="pdf-frame" title="Nội dung PDF" allow="fullscreen"></iframe><div class="pdf-controls"><button id="pdf-prev">← Prev · Tập trước</button><span id="pdf-position" role="status"></span><button id="pdf-next">Next · Tập sau →</button><button id="pdf-back">← Quay lại thư mục bìa sách</button></div></dialog><dialog id="config"><h2>Kết nối Google Drive</h2><p>Link mẫu có danh mục test sẵn. Để duyệt link công khai khác, nhập Google Drive API key đã bật Drive API. Không cần đăng nhập.</p><input id="apikey" type="password" placeholder="Google Drive API key" aria-label="Google Drive API key"><p>Key chỉ lưu trên trình duyệt này. Giới hạn key theo tên miền của app trong Google Cloud.</p><button id="savekey">Lưu cấu hình</button><button id="cancelkey">Đóng</button></dialog>`;
-async function fetchFolder(id){
- if(!key){const r=await fetch(`./data/${encodeURIComponent(id)}.json`);if(!r.ok)throw Error('Thư mục này chưa có trong danh mục test. Cấu hình Drive API key để duyệt đầy đủ.');return r.json();}
- const all=[];let token='';do{const u=new URL('https://www.googleapis.com/drive/v3/files');u.search=new URLSearchParams({key,q:`'${id}' in parents and trashed = false`,fields:'nextPageToken,files(id,name,mimeType,resourceKey)',pageSize:'1000',...(token?{pageToken:token}:{})});const r=await fetch(u);const d=await r.json();if(!r.ok)throw Error(d.error?.message||'Không truy cập được Drive.');all.push(...d.files);token=d.nextPageToken;}while(token);return {files:all};
+async function fetchFolder(id,signal){
+ if(!key){const r=await fetch(`./data/${encodeURIComponent(id)}.json`,{signal});if(!r.ok)throw Error('Thư mục này chưa có trong danh mục test. Cấu hình Drive API key để duyệt đầy đủ.');return r.json();}
+ const all=[];let token='';do{const u=new URL('https://www.googleapis.com/drive/v3/files');u.search=new URLSearchParams({key,q:`'${id}' in parents and trashed = false`,fields:'nextPageToken,files(id,name,mimeType,resourceKey)',pageSize:'1000',...(token?{pageToken:token}:{})});const r=await fetch(u,{signal});const d=await r.json();if(!r.ok)throw Error(d.error?.message||'Không truy cập được Drive.');all.push(...d.files);token=d.nextPageToken;}while(token);return {files:all};
 }
 function list(id){
  if(!folderCache.has(id)){
@@ -31,6 +31,13 @@ function list(id){
   folderCache.set(id,task);
  }
  return folderCache.get(id);
+}
+async function listCover(id,{signal}){
+ if(signal.aborted)throw Error('aborted');
+ if(folderCache.has(id))return folderCache.get(id);
+ const data=await fetchFolder(id,signal);
+ if(!signal.aborted&&!folderCache.has(id))folderCache.set(id,Promise.resolve(data));
+ return data;
 }
 async function openFolder(id,name,reset=false,restore=null){const n=++request;$('#status').textContent='Đang mở kệ sách…';try{const d=await list(id);if(n!==request)return;files=sort(d.files.filter(f=>f.mimeType==='application/vnd.google-apps.folder'||f.mimeType.startsWith('image/')||f.mimeType==='application/pdf'));trail=reset?[{id,name}]:[...trail,{id,name}];shelfPage=restore?.shelfPage||0;if(!restore)$('#filter').value='';$('#status').textContent=d.snapshot?d.notice:'';render();if(restore?.pdfOpen){const found=files.find(f=>f.id===restore.pdfId&&f.mimeType==='application/pdf');if(found)readPdf(found.id);}else if(restore?.readerOpen){const images=files.filter(f=>f.mimeType.startsWith('image/'));if(images.length)read(images);}}catch(e){if(n===request)$('#status').textContent=e.message;}}
 function saveLibrary(){
@@ -101,9 +108,11 @@ function loadCovers(albums,images){
      try{await loadCoverImage(image,coverUrl(cached)+(coversEnabled?'':'&jjcached=1'),controller.signal);found=cached;}catch{}
     }
     if(!found&&coversEnabled){
-     found=await findCover(albums[i],{list,sort,images,active:()=>epoch===coverEpoch,accept:async file=>{
-      await loadCoverImage(image,coverUrl(file),controller.signal);return true;
+     found=await findCover(albums[i],{list:listCover,sort,images,signal:controller.signal,active:()=>epoch===coverEpoch,accept:async (file,signal)=>{
+      const candidate=new Image();
+      await loadCoverImage(candidate,coverUrl(file),signal);return true;
      }});
+     if(found)image.src=coverUrl(found);
     }
     if(epoch!==coverEpoch)return;
     if(found){
