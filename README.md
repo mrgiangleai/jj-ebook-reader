@@ -16,7 +16,7 @@ Không có đăng nhập Google. Link mẫu được lập danh mục test trong
 
 Muốn nhập link công khai tùy ý: bật Google Drive API trong Google Cloud, tạo API key dành cho trình duyệt, giới hạn API về Drive API và HTTP referrers về tên miền Pages. Nhập key tại “Cấu hình Drive”. Key lưu trong localStorage, không commit. API phân trang đến hết danh sách. Một số link yêu cầu resource key chưa được hỗ trợ ở bản này.
 
-Ảnh dùng endpoint thumbnail của Drive với kích thước 1600px; chưa xác minh tải ảnh thực tế vì nguồn mẫu là PDF. Không đảm bảo đây là ảnh nguyên bản. Không dùng proxy công cộng bên thứ ba.
+Ảnh dùng endpoint thumbnail của Drive với kích thước 800px; chưa xác minh tải ảnh thực tế vì nguồn mẫu là PDF. Không đảm bảo đây là ảnh nguyên bản. Không dùng proxy công cộng bên thứ ba.
 
 ## GitHub Pages
 
@@ -49,4 +49,8 @@ Bìa PDF dùng thumbnail trang đầu của Google Drive. Bìa thư mục lấy 
 
 Đã kiểm tra browser: mặc định 8, không có yêu cầu ảnh bìa trước nút mở kệ, tải lần lượt và hiện ảnh thật, đổi trang bắt đầu với 1 ảnh, reload khôi phục trang 2 với 0 ảnh yêu cầu.
 
-Bìa dùng thumbnail nhỏ 240px thay vì 600px để ưu tiên tốc độ. Danh sách thư mục được cache trong phiên để tránh gọi lại khi quay về trang đã xem. Cache được xóa khi đổi cấu hình API key. Kiểm tra thuật toán: `node tests/cover-source.test.js` (thư mục trống, thứ tự số tự nhiên, nhánh lỗi, hủy khi đổi trang, vòng lặp, PDF).
+Bìa dùng thumbnail nhỏ 150px thay vì 600px để ưu tiên tốc độ. Danh sách thư mục được cache trong phiên để tránh gọi lại khi quay về trang đã xem. Cache được xóa khi đổi cấu hình API key. Kiểm tra thuật toán: `node tests/cover-source.test.js` (thư mục trống, thứ tự số tự nhiên, nhánh lỗi, hủy khi đổi trang, vòng lặp, PDF).
+
+## Cache bìa lâu dài
+
+Service worker lưu ảnh thumbnail 150px vào Cache Storage và ánh xạ nguồn thật trong localStorage theo link gốc. Reload chỉ phục hồi bìa từ cache, không tải ảnh mới từ Drive. Bấm Mở kệ sách tạo phiên nguồn mới để tải mới từ Drive. Ảnh lỗi sẽ thử ảnh/PDF kế tiếp rồi duyệt các thư mục con theo thứ tự, chỉ nhận nguồn khi ảnh tải thành công. Nếu toàn bộ nguồn không truy cập được, báo Chưa tải được ảnh bìa; không tạo ảnh giả. Trình đọc ảnh rời dùng 800px và tải trước 2 ảnh. PDF vẫn dùng Drive Preview, app không điều khiển được độ phân giải nội bộ của Google.

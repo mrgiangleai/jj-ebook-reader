@@ -12,3 +12,7 @@ assert.equal(await findCover(folder('root'),{...options,active:()=>active,list:a
 assert.equal(await findCover(folder('cycle'),{...options,list:async()=>({files:[folder('cycle')]})}),null);
 assert.equal((await findCover({id:'pdf',mimeType:'application/pdf'},options)).id,'pdf');
 console.log('PASS: empty branches, natural order, unavailable folder, cancellation, cycle, PDF');
+const rejected=[];
+const result=await findCover({...folder('root'),coverFile:image('hint')},{...options,accept:async file=>{rejected.push(file.id);return file.id==='later';}});
+assert.equal(result.id,'later');assert.deepEqual(rejected,['hint','page1','later']);
+console.log('PASS: failed image candidates continue to the next folder until an image loads');
