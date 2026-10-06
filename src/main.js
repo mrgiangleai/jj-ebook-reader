@@ -2,8 +2,9 @@ import './style.css';
 const ROOT='1eEWmqXZZmDXx4QsmsTsnjkgUMp7pe6EH';
 const $=s=>document.querySelector(s), app=$('#app');
 let trail=[],files=[],pages=[],spread=0,request=0,key=localStorage.getItem('jj-api-key')||'';
-let shelfPage=0,pageSize=4,resume=null,pdfIndex=0,pdfs=[],opening=false;
-try{resume=JSON.parse(localStorage.getItem('jj-library-state'));if([4,8,12].includes(resume?.pageSize))pageSize=resume.pageSize;}catch{}
+let shelfPage=0,pageSize=8,resume=null,pdfIndex=0,pdfs=[],opening=false,coversEnabled=false,coverEpoch=0,coverQueue=Promise.resolve(),coverAbort=null;
+const coverCache=new Map();
+try{resume=JSON.parse(localStorage.getItem('jj-library-state'));if(resume?.coverVersion===1&&[4,8,12].includes(resume?.pageSize))pageSize=resume.pageSize;}catch{}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const sort=a=>a.sort((a,b)=>a.name.localeCompare(b.name,'vi',{numeric:true}));
 const img=f=>`https://drive.google.com/thumbnail?id=${encodeURIComponent(f.id)}&sz=w1600`;
@@ -15,7 +16,7 @@ async function list(id){
 async function openFolder(id,name,reset=false,restore=null){const n=++request;$('#status').textContent='Đang mở kệ sách…';try{const d=await list(id);if(n!==request)return;files=sort(d.files.filter(f=>f.mimeType==='application/vnd.google-apps.folder'||f.mimeType.startsWith('image/')||f.mimeType==='application/pdf'));trail=reset?[{id,name}]:[...trail,{id,name}];shelfPage=restore?.shelfPage||0;if(!restore)$('#filter').value='';$('#status').textContent=d.snapshot?d.notice:'';render();if(restore?.pdfOpen){const found=files.find(f=>f.id===restore.pdfId&&f.mimeType==='application/pdf');if(found)readPdf(found.id);}else if(restore?.readerOpen){const images=files.filter(f=>f.mimeType.startsWith('image/'));if(images.length)read(images);}}catch(e){if(n===request)$('#status').textContent=e.message;}}
 function saveLibrary(){
  if(!trail.length)return;
- localStorage.setItem('jj-library-state',JSON.stringify({trail,shelfPage,pageSize,query:$('#filter').value,link:$('#link').value,readerOpen:$('#reader').open,pdfOpen:$('#pdf-reader').open,pdfId:pdfs[pdfIndex]?.id}));
+ localStorage.setItem('jj-library-state',JSON.stringify({coverVersion:1,trail,shelfPage,pageSize,query:$('#filter').value,link:$('#link').value,readerOpen:$('#reader').open,pdfOpen:$('#pdf-reader').open,pdfId:pdfs[pdfIndex]?.id}));
 }
 function fitTitles(){
  $('#shelf').querySelectorAll('.covername').forEach(el=>{
@@ -37,15 +38,55 @@ function render(){
  const visible=albums.slice(shelfPage*pageSize,(shelfPage+1)*pageSize);
  $('#shelf').innerHTML=visible.map((f,i)=>{
   const number=shelfPage*pageSize+i;
-  return `<button class="album" ${f.imageAlbum?'id="readalbum"':`data-id="${f.id}"`} style="--hue:${[23,154,207,348,42,263][number%6]}"><div class="cover ${f.imageAlbum?'imagecover':''}">${f.imageAlbum?`<img src="${img(images[0])}" alt="" loading="lazy"><span class="coverlabel">ĐỌC ALBUM</span>`:`<span class="edition">GOOGLE DRIVE / ALBUM</span><span class="covername">${esc(f.name)}</span><span class="ornament">✦</span><span class="coverbottom">JJ COLLECTION · ${String(number+1).padStart(2,'0')}</span>`}</div><h3>${esc(f.name)}</h3><p>${f.imageAlbum?`${images.length} trang · Mở sách ↗`:f.mimeType==='application/pdf'?'PDF · Mở sách ↗':'Mở thư mục ↗'}</p></button>`;
+  return `<button class="album" ${f.imageAlbum?'id="readalbum"':`data-id="${f.id}"`} style="--hue:${[23,154,207,348,42,263][number%6]}"><div class="cover"><span class="covername">${esc(f.name)}</span><img class="book-art" hidden alt="Bìa ${esc(f.name)}"><span class="cover-loading" hidden>Đang tải bìa…</span></div><h3>${esc(f.name)}</h3><p>${f.imageAlbum?`${images.length} trang · Mở sách ↗`:f.mimeType==='application/pdf'?'PDF · Mở sách ↗':'Mở thư mục ↗'}</p></button>`;
+
  }).join('');
  if(!albums.length)$('#shelf').innerHTML=query?'<p class="empty">Không tìm thấy sách theo tiêu đề này.</p>':'<p class="empty">Không có album hoặc ảnh phù hợp.</p>';
- $('#shelf-position').textContent=`Trang ${shelfPage+1} / ${totalPages} · ${albums.length} sách`;
+ $('#shelf-position').textContent=`Trang ${shelfPage+1} / ${totalPages}`;
  $('#shelf-prev').disabled=shelfPage===0;
  $('#shelf-next').disabled=shelfPage===totalPages-1;
  $('#shelf').querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>{const f=files.find(f=>f.id===b.dataset.id);zoomOpen(b,()=>f.mimeType==='application/pdf'?readPdf(f.id):openFolder(f.id,f.name))});
  if($('#readalbum'))$('#readalbum').onclick=()=>zoomOpen($('#readalbum'),()=>read(images));
- fitTitles();saveLibrary();
+ fitTitles();saveLibrary();loadCovers(visible,images);
+}
+async function coverFile(album,images,epoch,depth=0){
+ if(album.imageAlbum)return images[0];
+ if(album.mimeType==='application/pdf'||album.mimeType?.startsWith('image/'))return album;
+ if(album.coverFile)return album.coverFile;
+ if(depth>=5||epoch!==coverEpoch)return null;
+ const data=await list(album.id);if(epoch!==coverEpoch)return null;
+ const items=sort(data.files);
+ const media=items.find(f=>f.mimeType.startsWith('image/')||f.mimeType==='application/pdf');
+ if(media)return media;
+ const folder=items.find(f=>f.mimeType==='application/vnd.google-apps.folder');
+ return folder?coverFile(folder,images,epoch,depth+1):null;
+}
+function loadCovers(albums,images){
+ const epoch=++coverEpoch;coverAbort?.abort();
+ if(!coversEnabled)return;
+ const cards=[...$('#shelf').querySelectorAll('.album')];
+ coverQueue=coverQueue.catch(()=>{}).then(async()=>{
+  for(let i=0;i<albums.length;i++){
+   if(epoch!==coverEpoch)return;
+   const card=cards[i],image=card.querySelector('.book-art'),loading=card.querySelector('.cover-loading');
+   const controller=new AbortController();coverAbort=controller;
+   loading.hidden=false;
+   try{
+    let url=coverCache.get(albums[i].id);
+    if(!url){const file=await coverFile(albums[i],images,epoch);if(!file)continue;url=`https://drive.google.com/thumbnail?id=${encodeURIComponent(file.id)}&sz=w600${file.resourceKey?'&resourcekey='+encodeURIComponent(file.resourceKey):''}`;}
+    if(epoch!==coverEpoch)return;
+    await new Promise((resolve,reject)=>{
+     const timer=setTimeout(()=>{cleanup();image.removeAttribute('src');reject(Error('timeout'))},15000);
+     const cleanup=()=>{clearTimeout(timer);image.onload=null;image.onerror=null;controller.signal.removeEventListener('abort',abort)};
+     const abort=()=>{cleanup();image.removeAttribute('src');reject(Error('aborted'))};
+     controller.signal.addEventListener('abort',abort,{once:true});
+     image.onload=()=>{cleanup();resolve()};image.onerror=()=>{cleanup();reject(Error('image'))};image.src=url;
+    });
+    if(epoch!==coverEpoch)return;
+    coverCache.set(albums[i].id,url);image.hidden=false;card.querySelector('.covername').hidden=true;
+   }catch{}finally{loading.hidden=true;}
+  }
+ });
 }
 async function zoomOpen(button,action){
  if(opening)return;opening=true;
@@ -81,5 +122,5 @@ $('#pdf-reader').onclose=()=>{$('#pdf-frame').src='about:blank';document.body.st
 function read(images){pages=images;spread=Math.min(Math.floor((pages.length-1)/2),Math.max(0,Number(localStorage.getItem('jj-position-'+trail.at(-1).id))||0));$('#title').textContent=trail.at(-1).name;$('#jump').max=Math.floor((pages.length-1)/2);$('#reader').showModal();document.body.style.overflow='hidden';paint();saveLibrary();}
 function paint(){const start=spread*2;$('#spread').innerHTML=[pages[start],pages[start+1]].map(f=>f?`<div class="page"><img src="${img(f)}" alt="${esc(f.name)}"><div class="failed" hidden>Ảnh chưa tải được<br><button class="retry">Thử lại</button><a href="https://drive.google.com/file/d/${f.id}/view" target="_blank" rel="noopener">Mở trên Drive ↗</a></div></div>`:'<div class="page blank">Hết album</div>').join('');$('#spread').querySelectorAll('img').forEach(el=>{el.onerror=()=>{el.hidden=true;el.nextElementSibling.hidden=false;};el.nextElementSibling.querySelector('button').onclick=()=>{el.hidden=false;el.nextElementSibling.hidden=true;el.src=el.src+'&retry='+Date.now();};});$('#position').textContent=`Trang ${start+1}–${Math.min(start+2,pages.length)} / ${pages.length}`;$('#prev').disabled=spread===0;$('#next').disabled=start+2>=pages.length;$('#jump').value=spread;localStorage.setItem('jj-position-'+trail.at(-1).id,spread);pages.slice(start+2,start+6).forEach(f=>{const i=new Image();i.src=img(f)});}
 function turn(n){const next=Math.max(0,Math.min(Math.floor((pages.length-1)/2),spread+n));if(next!==spread){spread=next;paint();}}
-$('#source').onsubmit=e=>{e.preventDefault();const m=$('#link').value.match(/\/folders\/([\w-]+)/);if(!m){$('#status').textContent='Hãy nhập link thư mục Google Drive hợp lệ.';return;}$('#filter').value='';openFolder(m[1],m[1]===ROOT?'Truyện Tranh':'Thư viện Drive',true);};$('#page-size').value=pageSize;$('#page-size').onchange=e=>{pageSize=+e.target.value;shelfPage=0;render()};$('#filter').oninput=()=>{shelfPage=0;render()};$('#shelf-prev').onclick=()=>{shelfPage--;render()};$('#shelf-next').onclick=()=>{shelfPage++;render()};$('#prev').onclick=()=>turn(-1);$('#next').onclick=()=>turn(1);$('#jump').oninput=e=>{spread=+e.target.value;paint()};$('#close').onclick=()=>$('#reader').close();$('#reader').onclose=()=>{document.body.style.overflow='';saveLibrary();if(document.fullscreenElement)document.exitFullscreen();};$('#fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('#reader').requestFullscreen();}catch{}};document.addEventListener('keydown',e=>{if(!$('#reader').open||e.target.tagName==='INPUT')return;if(e.key==='ArrowLeft'){e.preventDefault();turn(-1)}if(e.key==='ArrowRight'){e.preventDefault();turn(1)}});let touch;$('#spread').addEventListener('touchstart',e=>{if(e.touches.length===1)touch={x:e.touches[0].clientX,y:e.touches[0].clientY};else touch=null},{passive:true});$('#spread').addEventListener('touchend',e=>{if(!touch)return;const dx=e.changedTouches[0].clientX-touch.x,dy=e.changedTouches[0].clientY-touch.y;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.5)turn(dx<0?1:-1);touch=null},{passive:true});$('#settings').onclick=()=>{$('#apikey').value=key;$('#config').showModal()};$('#cancelkey').onclick=()=>$('#config').close();$('#savekey').onclick=()=>{key=$('#apikey').value.trim();localStorage.setItem('jj-api-key',key);$('#config').close();const f=trail.at(-1);if(f){trail.pop();openFolder(f.id,f.name)}};
-if(Array.isArray(resume?.trail)&&resume.trail.length&&resume.trail.every(f=>typeof f.id==='string'&&typeof f.name==='string')){const target=resume.trail.at(-1);trail=resume.trail.slice(0,-1);$('#link').value=resume.link||$('#link').value;$('#filter').value=resume.query||'';openFolder(target.id,target.name,false,resume);}else openFolder(ROOT,'Truyện Tranh',true);
+$('#source').onsubmit=e=>{e.preventDefault();const m=$('#link').value.match(/\/folders\/([\w-]+)/);if(!m){$('#status').textContent='Hãy nhập link thư mục Google Drive hợp lệ.';return;}coversEnabled=true;$('#filter').value='';openFolder(m[1],m[1]===ROOT?'Truyện Tranh':'Thư viện Drive',true);};$('#page-size').value=pageSize;$('#page-size').onchange=e=>{pageSize=+e.target.value;shelfPage=0;render()};$('#filter').oninput=()=>{shelfPage=0;render()};$('#shelf-prev').onclick=()=>{shelfPage--;render()};$('#shelf-next').onclick=()=>{shelfPage++;render()};$('#prev').onclick=()=>turn(-1);$('#next').onclick=()=>turn(1);$('#jump').oninput=e=>{spread=+e.target.value;paint()};$('#close').onclick=()=>$('#reader').close();$('#reader').onclose=()=>{document.body.style.overflow='';saveLibrary();if(document.fullscreenElement)document.exitFullscreen();};$('#fullscreen').onclick=async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await $('#reader').requestFullscreen();}catch{}};document.addEventListener('keydown',e=>{if(!$('#reader').open||e.target.tagName==='INPUT')return;if(e.key==='ArrowLeft'){e.preventDefault();turn(-1)}if(e.key==='ArrowRight'){e.preventDefault();turn(1)}});let touch;$('#spread').addEventListener('touchstart',e=>{if(e.touches.length===1)touch={x:e.touches[0].clientX,y:e.touches[0].clientY};else touch=null},{passive:true});$('#spread').addEventListener('touchend',e=>{if(!touch)return;const dx=e.changedTouches[0].clientX-touch.x,dy=e.changedTouches[0].clientY-touch.y;if(Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.5)turn(dx<0?1:-1);touch=null},{passive:true});$('#settings').onclick=()=>{$('#apikey').value=key;$('#config').showModal()};$('#cancelkey').onclick=()=>$('#config').close();$('#savekey').onclick=()=>{key=$('#apikey').value.trim();localStorage.setItem('jj-api-key',key);$('#config').close();const f=trail.at(-1);if(f){trail.pop();openFolder(f.id,f.name)}};
+if(Array.isArray(resume?.trail)&&resume.trail.length&&resume.trail.every(f=>typeof f.id==='string'&&typeof f.name==='string')){const target=resume.trail.at(-1);trail=resume.trail.slice(0,-1);$('#link').value=resume.link||$('#link').value;$('#filter').value=resume.query||'';openFolder(target.id,target.name,false,{...resume,readerOpen:false,pdfOpen:false});}else openFolder(ROOT,'Truyện Tranh',true);
