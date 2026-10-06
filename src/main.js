@@ -3,7 +3,7 @@ import { findCover } from './cover-source.js';
 const ROOT='1eEWmqXZZmDXx4QsmsTsnjkgUMp7pe6EH';
 const $=s=>document.querySelector(s), app=$('#app');
 let trail=[],files=[],pages=[],spread=0,request=0,key=localStorage.getItem('jj-api-key')||'';
-let shelfPage=0,pageSize=8,resume=null,pdfIndex=0,pdfs=[],opening=false,coversEnabled=false,coverEpoch=0,coverQueue=Promise.resolve(),coverAbort=null;
+let shelfPage=0,pageSize=8,resume=null,pdfIndex=0,pdfs=[],opening=false,coversEnabled=false,coverEpoch=0,coverAbort=null;
 const folderCache=new Map();
 let coverScope=ROOT,coverRevision='',savedCovers={};
 function restoreCoverCache(scope){
@@ -81,14 +81,17 @@ function loadCoverImage(image,url,signal){
 function coverUrl(file){return `https://drive.google.com/thumbnail?id=${encodeURIComponent(file.id)}&sz=w150&jjcover=${encodeURIComponent(coverScope)}&jjversion=${encodeURIComponent(coverRevision)}${file.resourceKey?'&resourcekey='+encodeURIComponent(file.resourceKey):''}`;}
 function loadCovers(albums,images){
  const epoch=++coverEpoch;coverAbort?.abort();
+ const controller=new AbortController();coverAbort=controller;
  const cards=[...$('#shelf').querySelectorAll('.album')];
  const scope=coverScope,revision=coverRevision;
- coverQueue=coverQueue.catch(()=>{}).then(async()=>{
+ void (async()=>{
   const persistent=await workerReady;
-  for(let i=0;i<albums.length;i++){
+  let next=0;
+  async function loadNext(){
+   while(next<albums.length){
+   const i=next++;
    if(epoch!==coverEpoch)return;
    const card=cards[i],image=card.querySelector('.book-art'),loading=card.querySelector('.cover-loading');
-   const controller=new AbortController();coverAbort=controller;
    const cached=savedCovers[albums[i].id];
    if(!coversEnabled&&!cached)continue;
    loading.hidden=false;
@@ -108,10 +111,12 @@ function loadCovers(albums,images){
      savedCovers[albums[i].id]=found;
      localStorage.setItem('jj-covers-'+scope,JSON.stringify({revision,files:savedCovers}));
     }else if(coversEnabled){card.querySelector('.covername').textContent='Chưa tải được ảnh bìa';}
-   }catch{if(coversEnabled)card.querySelector('.covername').textContent='Chưa tải được ảnh bìa';}
+   }catch{if(epoch===coverEpoch&&coversEnabled)card.querySelector('.covername').textContent='Chưa tải được ảnh bìa';}
    finally{loading.hidden=true;}
+   }
   }
- });
+  await Promise.all(Array.from({length:Math.min(8,albums.length)},()=>loadNext()));
+ })();
 }
 async function zoomOpen(button,action){
  if(opening)return;opening=true;
